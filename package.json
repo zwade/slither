@@ -16,7 +16,6 @@
   "license": "ISC",
   "dependencies": {
     "commander": "^2.9.0",
-    "editor": "^1.0.0",
     "inquirer": "^3.0.1",
     "mz": "^2.6.0"
   },
