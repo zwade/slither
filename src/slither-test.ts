@@ -255,3 +255,5 @@ function update(results: Results) {
 	process.stdout.write(CLEAR);
 	process.stdout.write(UP(results.results.length));
 }
+
+// process.on('unhandledRejection', (reason: string, promise: string) => console.log(reason, promise));
