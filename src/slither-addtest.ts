@@ -1,7 +1,6 @@
 import * as commander from "commander";
 import * as cp from "mz/child_process";
 import * as fs from "mz/fs";
-import editor from "editor";
 
 import checkers from "./checkers";
 
