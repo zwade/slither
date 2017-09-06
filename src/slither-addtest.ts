@@ -77,8 +77,10 @@ if (name === undefined) {
 					test++;
 				}
 
-				return exec(`${process.env.EDITOR} .slither/${name}/${test}.in`, { shell: true, stdio: "inherit" })
-					.then(() => exec(`${process.env.EDITOR} .slither/${name}/${test}.out`, { shell: true, stdio: "inherit" }))
+				let editor = process.env.VISUAL || process.env.EDITOR || "vim";
+
+				return exec(`${editor} .slither/${name}/${test}.in`, { shell: true, stdio: "inherit" })
+					.then(() => exec(`${editor} .slither/${name}/${test}.out`, { shell: true, stdio: "inherit" }))
 					.then(() => console.log(`${GREEN}Successfully added test ${test} to testset ${name}.${CLEAR} ${SNEK}`))
 					.catch((err) => console.error(`${RED}Failed to add test to testset.${CLEAR}\n${JSON.stringify(err)}`));
 			});
@@ -92,8 +94,6 @@ function exec(cmd: string, options: cp.SpawnOptions): Promise<{ stdout: string, 
 
 		let stdout = "";
 		let stderr = "";
-
-		// console.log(child, child.stdout, child.stderr);
 
 		if (child.stdout) {
 			child.stdout.on("data", (data) => stdout += data);

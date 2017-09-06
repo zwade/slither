@@ -1,6 +1,10 @@
 import * as commander from "commander";
 import * as cp from "mz/child_process";
 import * as fs from "mz/fs";
+import truncate = require("cli-truncate");
+import width = require("string-width");
+import rusage = require("qrusage");
+require("keypress")(process.stdin);
 
 import checkers from "./checkers";
 
@@ -12,17 +16,24 @@ const DOWN = (n: number) => `\x1b[${n}B`;
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
+const BLUE = "\x1b[34m";
 const WHITE = "\x1b[39m";
+const PURPLE = "\x1b[35m";
+const CYAN = "\x1b[36m";
 const GRAY = "\x1b[90m";
 const BOLD = "\x1b[1m";
 const CLEAR = "\x1b[0m";
+const ERASE_SCREEN = "\x1b[2J";
+const RESET_CURSOR = "\x1b[0,0H";
 const SNEK = "🐍  ";
 
 const OK = "✓";
 const WRONG_ANSWER = "✗";
 const WAITING = "•";
 const RUNNING = "•";
-const TIME_LIMIT_EXCEEDED = "!";
+const TIME_LIMIT_EXCEEDED = "t";
+const RUNTIME_ERROR = "!";
+const MEMORY_LIMIT_EXCEEDED = "m";
 
 function parseTests(val: string) {
 	let parts = val.split(",");
@@ -49,6 +60,7 @@ let name: string;
 commander
 	.arguments("<set>")
 	.option("-t, --tests [tests]", "Which tests to run", parseTests)
+	.option("-i, --inspect", "Inspect tests after running")
 	.action((set: string) => {
 		name = set;
 	})
@@ -84,26 +96,31 @@ if (name === undefined) {
 
 		process.stdout.write(HIDE_CURSOR);
 
-		let prm: Promise<Results> = compilePrm.then(() => ({ results: tests.map((index: number) => ({ index, state: State.WAITING })) }));
+		let prm: Promise<Results> = compilePrm.then(() => ({
+			results: tests.map((index: number) => ({ index, state: State.WAITING } as IncompleteTestResult))
+		}));
 
 		for (let i = 0; i < tests.length; i++) {
 			prm.then((results) => {
 				results.results[i].state = State.RUNNING;
 				update(results);
-			});
+			}).catch((error) => console.error(`${RED}Error: ${error}${CLEAR}`));
 
 			prm = prm.then((results) => {
-				results.results[i].time = Date.now();
 				return test(results, name, testset, tests[i], i);
 			});
 		}
 
-		prm.then((results) => {
+		return prm.then((results) => {
 			update(results);
 			process.stdout.write(DOWN(results.results.length));
-			process.stdout.write(SHOW_CURSOR);
-			exec(testset.scripts.cleanup)
+			exec(testset.scripts.cleanup);
+			return results;
 		});
+	}).then((results) => {
+		if ((commander as any).inspect) {
+			new Inspector(results);
+		}
 	}).catch((err) => { console.error(`${RED}Error:`, err, SHOW_CURSOR, CLEAR); });
 }
 
@@ -134,7 +151,11 @@ function exec(cmd: string, input: string = "", timeout: number = 0): Promise<{ s
 			}, timeout);
 		}
 
+		// let interval = setInterval(() => fs.readFile(`/proc/${child.pid}/stat`).then(console.log), 20);
+
 		child.on("close", (code) => {
+			// clearInterval(interval);
+
 			if (timer) {
 				clearTimeout(timer);
 			}
@@ -168,6 +189,7 @@ function test(results: Results, name: string, testset: Testset, test: number, id
 	let inPrm = fs.readFile(`.slither/${name}/${test}.in`);
 	let outPrm = fs.readFile(`.slither/${name}/${test}.out`);
 	let filePrm = Promise.all([inPrm, outPrm]);
+	let startTime = Date.now();
 
 	filePrm.catch((err) =>
 		console.error(`${RED}Input or output file missing for test ${test}.${CLEAR}`));
@@ -176,84 +198,284 @@ function test(results: Results, name: string, testset: Testset, test: number, id
 		let input = inBuf.toString();
 		let output = outBuf.toString();
 
+		let testResult = results.results[idx];
+		let time = Date.now() - startTime;
+		let memory = rusage(rusage.RUSAGE_CHILDREN).maxrss;
+
 		return exec(testset.scripts.run, input, testset.limits.time)
 			.then(({ stdout, stderr, timeout }) => {
-				results.results[idx].time = Date.now() - results.results[idx].time;
-				results.results[idx].memory = 123;
-
-				return checkers[testset.checker.type]({ input, output, check: stdout })
-					.then((result) => { results.results[idx].state = State.OK; return results; })
-					.catch((err) => { results.results[idx].state = State.WRONG_ANSWER; return results; });
+				return checkers[testset.checker.type]({ input, expected: output, actual: stdout })
+					.then(({ ok, display }) => {
+						Object.assign(testResult, {
+							time,
+							memory,
+							state: ok ? State.OK : State.WRONG_ANSWER,
+							output: {
+								expected: output,
+								actual: stdout,
+								displayExpected: display.expected,
+								displayActual: display.actual
+							}
+						});
+					})
+					.then(() => results);
 			})
 			.catch(({ stdout, stderr, timeout }) => {
 				if (timeout) {
-					results.results[idx].time = testset.limits.time;
-					results.results[idx].memory = 123;
-					results.results[idx].state = State.TIME_LIMIT_EXCEEDED;
-					return results;
+					Object.assign(testResult, {
+						time: testset.limits.time,
+						memory,
+						state: State.TIME_LIMIT_EXCEEDED,
+						output: { expected: output, actual: stdout }
+					});
+				} else if (/memory/i.test(stderr)) {
+					// cheating for now - any error containing "memory" is out-of-memory
+					Object.assign(testResult, {
+						time,
+						memory,
+						state: State.MEMORY_LIMIT_EXCEEDED,
+						output: { expected: output, actual: stdout }
+					});
+				} else {
+					Object.assign(testResult, {
+						time,
+						memory,
+						state: State.RUNTIME_ERROR,
+						output: { expected: output, actual: stdout, error: stderr }
+					});
 				}
-
-				// if (timeout) {
-				// 	return;
-				// }
-
-				// console.error(`${RED}Test ${test} exited with non-zero exit code.${CLEAR}`);
-				// console.error(`${RED}${err}${CLEAR}`);
+				return results;
 			});
+	}).catch((err) => {
+		console.error(`${RED}File system error: ${err}`);
+		return results;
 	});
 }
 
-function update(results: Results) {
-	for (let result of results.results) {
-		switch (result.state) {
-			case State.OK:
-				process.stdout.write(GREEN);
-				process.stdout.write(OK);
-				break;
+function printTestResult(result: TestResult): void {
+	switch (result.state) {
+		case State.OK:
+			process.stdout.write(`${GREEN}${OK}`);
+			break;
 
-			case State.WRONG_ANSWER:
-				process.stdout.write(RED);
-				process.stdout.write(WRONG_ANSWER);
-				break;
+		case State.WRONG_ANSWER:
+			process.stdout.write(`${RED}${WRONG_ANSWER}`);
+			break;
 
-			case State.WAITING:
-				process.stdout.write(GRAY);
-				process.stdout.write(WAITING);
-				break;
+		case State.WAITING:
+			process.stdout.write(`${GRAY}${WAITING}`);
+			break;
 
-			case State.RUNNING:
-				process.stdout.write(CLEAR);
-				process.stdout.write(RUNNING);
-				break;
+		case State.RUNNING:
+			process.stdout.write(`${CLEAR}${WAITING}`);
+			break;
 
-			case State.TIME_LIMIT_EXCEEDED:
-				process.stdout.write(YELLOW);
-				process.stdout.write(TIME_LIMIT_EXCEEDED);
-				break;
-		}
+		case State.TIME_LIMIT_EXCEEDED:
+			process.stdout.write(`${YELLOW}${TIME_LIMIT_EXCEEDED}`);
+			break;
 
-		process.stdout.write(" ");
-		process.stdout.write(CLEAR);
-		process.stdout.write(result.index.toString());
-		process.stdout.write(" ");
+		case State.RUNTIME_ERROR:
+			process.stdout.write(`${PURPLE}${RUNTIME_ERROR}`);
+			break;
 
-		if (result.state === State.RUNNING) {
+		case State.MEMORY_LIMIT_EXCEEDED:
+			process.stdout.write(`${CYAN}${MEMORY_LIMIT_EXCEEDED}`);
+			break;
+	}
+
+	process.stdout.write(" ");
+	process.stdout.write(WHITE);
+	process.stdout.write(result.index.toString());
+	process.stdout.write(" ");
+
+	switch (result.state) {
+		case State.WAITING:
+			// do nothing
+			break;
+
+		case State.RUNNING:
 			process.stdout.write(GRAY);
 			process.stdout.write("[ Running ]");
-		} else if (result.state !== State.WAITING) {
+			break;
+
+		default:
 			process.stdout.write(GRAY);
 			process.stdout.write("[ ");
 			process.stdout.write(result.time.toFixed(0));
 			process.stdout.write(" ms / ");
-			process.stdout.write(result.memory.toFixed(3));
+			process.stdout.write((result.memory / 1048576).toFixed(3));
 			process.stdout.write(" MB ]");
-		}
+			break;
+	}
+}
 
+function update(results: Results): void {
+	for (let result of results.results) {
+		printTestResult(result);
 		process.stdout.write("\n");
 	}
 
 	process.stdout.write(CLEAR);
 	process.stdout.write(UP(results.results.length));
+}
+
+function rightPad(str: string, length: number, padChar: string = " ") {
+	while (width(str) < length) {
+		str = str + padChar;
+	}
+	return str;
+}
+
+function leftPad(str: string, length: number, padChar: string = " ") {
+	while (width(str) < length) {
+		str = padChar + str;
+	}
+	return str;
+}
+
+class Inspector {
+	private results: Results;
+	private index: number;
+
+	public constructor(results: Results) {
+		this.results = results;
+		this.index = 0;
+
+		this.display();
+
+		process.stdin.on("keypress", (ch: string, key: { name: string, ctrl: boolean, meta: boolean, shift: boolean, sequence: string, code: string }) => {
+			if (key && key.ctrl && key.name === "c") {
+				process.stdout.write(SHOW_CURSOR);
+				process.stdin.pause();
+			}
+
+			switch (key.name) {
+				case "down":
+					this.index = (this.index + 1) % this.results.results.length;
+					this.display();
+					break;
+
+				case "up":
+					this.index = (this.index + this.results.results.length - 1) % this.results.results.length;
+					this.display();
+					break;
+			}
+		});
+
+		(process.stdin as any).setRawMode(true);
+	}
+
+	private display() {
+		let current = this.results.results[this.index];
+		let cols = (process.stdout as any).columns;
+
+		process.stdout.write(ERASE_SCREEN);
+		process.stdout.write(RESET_CURSOR);
+
+		for (let i = 0; i < this.results.results.length; i++) {
+			if (this.index == i) {
+				process.stdout.write(BLUE);
+				process.stdout.write(">> ");
+			} else {
+				process.stdout.write("   ");
+			}
+			printTestResult(this.results.results[i]);
+			process.stdout.write(CLEAR);
+			process.stdout.write("\n");
+		}
+
+		process.stdout.write("\n");
+		process.stdout.write(rightPad(GRAY, cols, "-"));
+		process.stdout.write(`${CLEAR}\n\n${WHITE}${BOLD}Test ${current.index}  •  Verdict: ${CLEAR}`);
+
+		switch (current.state) {
+			case State.OK:
+				process.stdout.write(`${GREEN}OK${CLEAR}`);
+				break;
+
+			case State.WRONG_ANSWER:
+				process.stdout.write(`${RED}Wrong answer${CLEAR}`);
+				break;
+
+			case State.TIME_LIMIT_EXCEEDED:
+				process.stdout.write(`${YELLOW}Time limit exceeded${CLEAR}`);
+				break;
+
+			case State.RUNTIME_ERROR:
+				process.stdout.write(`${PURPLE}Runtime error${CLEAR}\n${BOLD}${WHITE}\n${RED}${current.output.error}${CLEAR}`);
+				break;
+
+			case State.MEMORY_LIMIT_EXCEEDED:
+				process.stdout.write(`${CYAN}Memory limit exceeded${CLEAR}`);
+				break;
+		}
+
+		process.stdout.write("\n\n");
+
+		let expected = "";
+		let actual = "";
+
+		switch (current.state) {
+			case State.OK:
+			case State.WRONG_ANSWER:
+				expected = (current as CompleteTestResult).output.displayExpected;
+				actual = (current as CompleteTestResult).output.displayActual;
+				break;
+
+			case State.MEMORY_LIMIT_EXCEEDED:
+			case State.RUNTIME_ERROR:
+			case State.TIME_LIMIT_EXCEEDED:
+				expected = numberLines(current.output.expected);
+				actual = numberLines(current.output.actual);
+				break;
+		}
+
+		let size = Math.floor((cols - 3) / 2);
+
+		let expectedLines = formatDisplayLines(expected, size);
+		let actualLines = formatDisplayLines(actual, size);
+
+		let expectedHeader = rightPad(`${BOLD}${WHITE} Expected ${CLEAR}${GRAY}(${expectedLines.length} lines)${CLEAR}`, size);
+		let actualHeader = rightPad(`${BOLD}${WHITE} Actual ${CLEAR}${GRAY}(${actualLines.length} lines)${CLEAR}`, size);
+
+		expectedLines = expectedLines.slice(0, 20);
+		actualLines = actualLines.slice(0, 20);
+
+		process.stdout.write(`${expectedHeader} ${CLEAR}| ${actualHeader}\n`);
+		process.stdout.write(`${rightPad("", size, "-")}-+-${rightPad("", size, "-")}\n`);
+
+		for (let i = 0; i < Math.max(expectedLines.length, actualLines.length); i++) {
+			let expected = i < expectedLines.length ? expectedLines[i] : "";
+			let actual = i < actualLines.length ? actualLines[i] : "";
+
+			process.stdout.write(`${expected} | ${actual}\n`);
+		}
+	}
+}
+
+function numberLines(str: string): string {
+	let lines = str.split(/\n/g);
+
+	while (lines[lines.length - 1] === "") {
+		lines.pop();
+	}
+
+	let padWidth = lines.length.toString().length;
+
+	return lines
+		.map((l, i) => `${GRAY}${leftPad(`${i+1}`, padWidth)}${CLEAR} ${l}`)
+		.join("\n");
+}
+
+function formatDisplayLines(str: string, size: number): string[] {
+	let lines = str.split(/\n/g);
+
+	while (lines[lines.length - 1] === "") {
+		lines.pop();
+	}
+
+	return lines
+			.map((l) => rightPad(truncate(l, size), size));
 }
 
 // process.on('unhandledRejection', (reason: string, promise: string) => console.log(reason, promise));

@@ -83,7 +83,7 @@ const questions: inquirer.Questions = [
 	{
 		type: "input",
 		name: "scripts.compile",
-		message: "Build Command",
+		message: "Compile Command",
 		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].scripts.compile,
 	},
 	{
@@ -95,17 +95,17 @@ const questions: inquirer.Questions = [
 	{
 		type: "input",
 		name: "scripts.cleanup",
-		message: "Build Command",
+		message: "Cleanup Command",
 		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].scripts.cleanup,
 	},
 	{
 		type: "list",
 		name: "checker",
 		message: "Checker Options",
-		choices: ["Exact Match", "1e-3 Error", "1e-4 Error", "1e-6 Error"],
+		choices: ["Exact Match" /*, "1e-3 Error", "1e-4 Error", "1e-6 Error" */],
 		filter: (val) => {
 			switch (val) {
-				case "Exact Match": return { type: "tokens" };
+				case "Exact Match": return { type: "lines" };
 				case "1e-3 Error": return { type: "abs-rel", amount: 3 };
 				case "1e-4 Error": return { type: "abs-rel", amount: 4 };
 				case "1e-6 Error": return { type: "abs-rel", amount: 6 };

@@ -1,0 +1,21 @@
+{
+	"Test": {
+		"limits": {
+			"time": 2000,
+			"memory": 128
+		},
+		"io": {
+			"input": "stdin",
+			"output": "stdout"
+		},
+		"scripts": {
+			"compile": "javac Test.java",
+			"run": "java -Xmx64M -Xss64M -DONLINE_JUDGE=false -Duser.language=en -Duser.region=US -Duser.variant=US Test",
+			"cleanup": "rm Test.class"
+		},
+		"checker": {
+			"type": "lines"
+		},
+		"debug": "#"
+	}
+}
