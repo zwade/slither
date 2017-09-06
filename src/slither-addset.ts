@@ -18,7 +18,7 @@ const TEMPLATES: { [key: string]: any } = {
 		scripts: {
 			compile: "javac {name}.java",
 			run: "java -Xmx512M -Xss64M -DONLINE_JUDGE=false -Duser.language=en -Duser.region=US -Duser.variant=US {name}",
-			cleanup: "rm {name}.class"
+			cleanup: "ls | grep -e '{name}.*\\.class' | xargs rm"
 		}
 	},
 	"python": {

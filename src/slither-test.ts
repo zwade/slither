@@ -120,14 +120,15 @@ if (name === undefined) {
 	}).then((results) => {
 		if ((commander as any).inspect) {
 			new Inspector(results);
+		} else {
+			process.stdout.write(SHOW_CURSOR);
 		}
 	}).catch((err) => { console.error(`${RED}Error:`, err, SHOW_CURSOR, CLEAR); });
 }
 
 function exec(cmd: string, input: string = "", timeout: number = 0): Promise<{ stdout: string, stderr: string, timeout?: boolean }> {
 	return new Promise((resolve, reject) => {
-		let parts = cmd.split(" ");
-		let child = cp.spawn(parts[0], parts.slice(1));
+		let child = cp.spawn("sh", ["-c", cmd]);
 
 		let stdout = "";
 		let stderr = "";
@@ -478,4 +479,4 @@ function formatDisplayLines(str: string, size: number): string[] {
 			.map((l) => rightPad(truncate(l, size), size));
 }
 
-// process.on('unhandledRejection', (reason: string, promise: string) => console.log(reason, promise));
+process.on('unhandledRejection', (reason: string, promise: string) => console.log(RED, "Unhandled promise rejection (please file a bug):", reason, promise));
