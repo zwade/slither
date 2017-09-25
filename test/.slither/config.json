@@ -17,5 +17,24 @@
 			"type": "lines"
 		},
 		"debug": "#"
+	},
+	"TestNoCompile": {
+		"limits": {
+			"time": 4000,
+			"memory": 64
+		},
+		"io": {
+			"input": "stdin",
+			"output": "stdout"
+		},
+		"scripts": {
+			"compile": "javac TestNoCompile.java",
+			"run": "java -Xmx512M -Xss64M -DONLINE_JUDGE=false -Duser.language=en -Duser.region=US -Duser.variant=US TestNoCompile",
+			"cleanup": "ls | grep -e 'TestNoCompile.*\\.class' | xargs rm"
+		},
+		"checker": {
+			"type": "lines"
+		},
+		"debug": "#"
 	}
 }

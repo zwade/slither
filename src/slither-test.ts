@@ -61,6 +61,7 @@ commander
 	.arguments("<set>")
 	.option("-t, --tests [tests]", "Which tests to run", parseTests)
 	.option("-i, --inspect", "Inspect tests after running")
+	.option("-r, --raw", "Get raw output from a single test")
 	.action((set: string) => {
 		name = set;
 	})
@@ -71,8 +72,10 @@ if (name === undefined) {
 } else {
 	let configPrm = fs.readFile(".slither/config.json");
 
-	configPrm.catch((err) =>
-		console.error(`${RED}No Slither configuration found in the current directory.  Run ${WHITE}${BOLD}slither init${RED} first.${CLEAR}`));
+	configPrm.catch((err) => {
+		console.error(`${RED}No Slither configuration found in the current directory.  Run ${WHITE}${BOLD}slither init${RED}${CLEAR}${RED} first.${CLEAR}`);
+		process.exit(1);
+	});
 
 	configPrm.then((data) => {
 		let config = JSON.parse(data.toString()) as Config;
@@ -90,9 +93,20 @@ if (name === undefined) {
 			return getAllTests(name).then((tests) => ({ testset, tests }));
 		}
 	}).then(({ testset, tests }) => {
-		let compilePrm = exec(testset.scripts.compile);
+		if ((commander as any).raw && tests.length != 1) {
+			console.error(`${BOLD}${RED}Error: -r/--raw can only be used with a single test${CLEAR}${SHOW_CURSOR}`);
+			process.exit(1); // TODO: better control flow
+		} else if ((commander as any).raw && (commander as any).inspect) {
+			console.error(`${BOLD}${RED}Error: -r/--raw can't be used with -i/--inspect${SHOW_CURSOR}`);
+			process.exit(1); // TODO: better control flow
+		}
 
-		compilePrm.catch(({ stdout, stderr }) => console.error(`${RED}Compile error:${CLEAR} ${stderr}`));
+		let compilePrm: Promise<any> = exec(testset.scripts.compile);
+
+		compilePrm = compilePrm.catch(({ stdout, stderr }) => {
+			console.error(`${BOLD}${RED}Compile error:${CLEAR}\n\n${stderr}${SHOW_CURSOR}`);
+			process.exit(1); // TODO: better control flow
+		});
 
 		process.stdout.write(HIDE_CURSOR);
 
@@ -254,6 +268,8 @@ function test(results: Results, name: string, testset: Testset, test: number, id
 }
 
 function printTestResult(result: TestResult): void {
+	process.stdout.write(BOLD);
+
 	switch (result.state) {
 		case State.OK:
 			process.stdout.write(`${GREEN}${OK}`);
@@ -285,6 +301,7 @@ function printTestResult(result: TestResult): void {
 	}
 
 	process.stdout.write(" ");
+	process.stdout.write(CLEAR);
 	process.stdout.write(WHITE);
 	process.stdout.write(result.index.toString());
 	process.stdout.write(" ");
@@ -302,9 +319,9 @@ function printTestResult(result: TestResult): void {
 		default:
 			process.stdout.write(GRAY);
 			process.stdout.write("[ ");
-			process.stdout.write(result.time.toFixed(0));
+			process.stdout.write(leftPad(result.time.toFixed(0), 4));
 			process.stdout.write(" ms / ");
-			process.stdout.write((result.memory / 1048576).toFixed(3));
+			process.stdout.write(leftPad((result.memory / 1048576).toFixed(3), 8));
 			process.stdout.write(" MB ]");
 			break;
 	}
@@ -360,6 +377,10 @@ class Inspector {
 					this.index = (this.index + this.results.results.length - 1) % this.results.results.length;
 					this.display();
 					break;
+
+				case "q":
+					process.stdout.write(SHOW_CURSOR);
+					process.stdin.pause();
 			}
 		});
 
