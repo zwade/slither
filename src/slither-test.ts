@@ -137,7 +137,10 @@ if (name === undefined) {
 			});
 		})
 		.then((results: Results) => {
-			if ((commander as any).inspect) {
+			if ((commander as any).raw) {
+				process.stdout.write((results.results[0] as CompleteTestResult).output.actual);
+				process.stdout.write(SHOW_CURSOR);
+			} else if ((commander as any).inspect) {
 				new Inspector(results);
 			} else {
 				process.stdout.write(SHOW_CURSOR);
@@ -330,6 +333,10 @@ function printTestResult(result: TestResult): void {
 }
 
 function update(results: Results): void {
+	if ((commander as any).raw) {
+		return;
+	}
+
 	for (let result of results.results) {
 		printTestResult(result);
 		process.stdout.write("\n");
