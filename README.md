@@ -53,7 +53,7 @@ Custom set templates can be used by creating a JSON file in `~/.slither_template
 			"timeout": 8000,
 			"memory": 64
 		},
-		scripts: {
+		"scripts": {
 			"run": "python {name}.py"
 		}
 	},
@@ -62,7 +62,7 @@ Custom set templates can be used by creating a JSON file in `~/.slither_template
 			"timeout": 2000,
 			"memory": 64
 		},
-		scripts: {
+		"scripts": {
 			"run": "node {name}.js"
 		}
 	}
