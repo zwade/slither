@@ -2,7 +2,7 @@ import * as commander from "commander";
 import * as fs from "fs";
 
 commander
-	.version("0.0.1")
+	.version("0.2.0")
 	.command("init", "initialize slither in a directory")
 	.command("addset", "add a new test set")
 	.command("addtest <set>", "add a new test case to a testset")
