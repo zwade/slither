@@ -103,13 +103,13 @@ const questions = (templates: { [key: string]: any }) => [
 		type: "list",
 		name: "checker",
 		message: "Checker Options",
-		choices: ["Exact Match" /*, "1e-3 Error", "1e-4 Error", "1e-6 Error" */],
+		choices: ["Exact Match" , "1e-3 Error", "1e-4 Error", "1e-6 Error"],
 		filter: (val: string) => {
 			switch (val) {
 				case "Exact Match": return { type: "lines" };
-				case "1e-3 Error": return { type: "abs-rel", amount: 3 };
-				case "1e-4 Error": return { type: "abs-rel", amount: 4 };
-				case "1e-6 Error": return { type: "abs-rel", amount: 6 };
+				case "1e-3 Error": return { type: "abs-rel", options: { amount: 3 } };
+				case "1e-4 Error": return { type: "abs-rel", options: { amount: 4 } };
+				case "1e-6 Error": return { type: "abs-rel", options: { amount: 6 } };
 			}
 		}
 	},

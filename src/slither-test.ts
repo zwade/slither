@@ -224,7 +224,7 @@ function test(results: Results, name: string, testset: Testset, test: number, id
 
 		return exec(testset.scripts.run, input, testset.limits.time)
 			.then(({ stdout, stderr, timeout }) => {
-				return checkers[testset.checker.type]({ input, expected: output, actual: stdout })
+				return checkers[testset.checker.type](testset.checker.options, { input, expected: output, actual: stdout })
 					.then(({ ok, display }) => {
 						Object.assign(testResult, {
 							time,
