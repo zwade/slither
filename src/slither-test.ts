@@ -445,12 +445,16 @@ class Inspector {
 
 		let expected = "";
 		let actual = "";
+		let expectedCount = 0;
+		let actualCount = 0;
 
 		switch (current.state) {
 			case State.OK:
 			case State.WRONG_ANSWER:
 				expected = (current as CompleteTestResult).output.displayExpected;
 				actual = (current as CompleteTestResult).output.displayActual;
+				expectedCount = dropTrailingNewlines((current as CompleteTestResult).output.expected.split("\n")).length;
+				actualCount = dropTrailingNewlines((current as CompleteTestResult).output.actual.split("\n")).length;
 				break;
 
 			case State.MEMORY_LIMIT_EXCEEDED:
@@ -458,19 +462,21 @@ class Inspector {
 			case State.TIME_LIMIT_EXCEEDED:
 				expected = numberLines(current.output.expected);
 				actual = numberLines(current.output.actual);
+				expectedCount = dropTrailingNewlines(current.output.expected.split("\n")).length;
+				actualCount = dropTrailingNewlines(current.output.actual.split("\n")).length;
 				break;
 		}
 
 		let size = Math.floor((cols - 3) / 2);
 
-		let expectedLines = formatDisplayLines(expected, size);
-		let actualLines = formatDisplayLines(actual, size);
+		let expectedLines = expected.split("\n").slice(0, 20);
+		let actualLines = actual.split("\n").slice(0, 20);
 
-		let expectedHeader = rightPad(`${BOLD}${WHITE} Expected ${CLEAR}${GRAY}(${expectedLines.length} lines)${CLEAR}`, size);
-		let actualHeader = rightPad(`${BOLD}${WHITE} Actual ${CLEAR}${GRAY}(${actualLines.length} lines)${CLEAR}`, size);
+		expectedLines = formatDisplayLines(expectedLines, size);
+		actualLines = formatDisplayLines(actualLines, size);
 
-		expectedLines = expectedLines.slice(0, 20);
-		actualLines = actualLines.slice(0, 20);
+		let expectedHeader = rightPad(`${BOLD}${WHITE} Expected ${CLEAR}${GRAY}(${expectedCount} lines)${CLEAR}`, size);
+		let actualHeader = rightPad(`${BOLD}${WHITE} Actual ${CLEAR}${GRAY}(${actualCount} lines)${CLEAR}`, size);
 
 		process.stdout.write(`${expectedHeader} ${CLEAR}| ${actualHeader}\n`);
 		process.stdout.write(`${rightPad("", size, "-")}-+-${rightPad("", size, "-")}\n`);
@@ -484,13 +490,16 @@ class Inspector {
 	}
 }
 
-function numberLines(str: string): string {
-	let lines = str.split(/\n/g);
-
+function dropTrailingNewlines(lines: string[]): string[] {
 	while (lines[lines.length - 1] === "") {
 		lines.pop();
 	}
 
+	return lines;
+}
+
+function numberLines(str: string): string {
+	let lines = dropTrailingNewlines(str.split(/\n/g));
 	let padWidth = lines.length.toString().length;
 
 	return lines
@@ -498,9 +507,7 @@ function numberLines(str: string): string {
 		.join("\n");
 }
 
-function formatDisplayLines(str: string, size: number): string[] {
-	let lines = str.split(/\n/g);
-
+function formatDisplayLines(lines: string[], size: number): string[] {
 	while (lines[lines.length - 1] === "") {
 		lines.pop();
 	}
