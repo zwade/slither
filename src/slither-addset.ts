@@ -1,5 +1,6 @@
 import * as inquirer from "inquirer";
-import * as fs from "fs";
+import * as fs from "mz/fs";
+import * as path from "path";
 
 const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
@@ -9,7 +10,7 @@ const BOLD = "\x1b[1m";
 const CLEAR = "\x1b[0m";
 const SNEK = "🐍";
 
-const TEMPLATES: { [key: string]: any } = {
+const DEFAULT_TEMPLATES: { [key: string]: any } = {
 	"java": {
 		limits: {
 			timeout: 4000,
@@ -41,7 +42,7 @@ const TEMPLATES: { [key: string]: any } = {
 	}
 }
 
-const questions: inquirer.Questions = [
+const questions = (templates: { [key: string]: any }) => [
 	{
 		type: "input",
 		name: "name",
@@ -51,21 +52,21 @@ const questions: inquirer.Questions = [
 		type: "list",
 		name: "template",
 		message: "Template",
-		choices: ["Java", "Python", "JS", "None"],
-		filter: (val) => val.toLowerCase()
+		choices: Object.keys(templates).concat(["none"]),
+		filter: (val: string) => val.toLowerCase()
 	},
 	{
 		type: "input",
 		name: "limits.time",
 		message: "Timeout",
-		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].limits.timeout,
+		default: ({ template }: Answers) => template === "none" ? undefined : templates[template].limits.timeout,
 		filter: parseFloat
 	},
 	{
 		type: "input",
 		name: "limits.memory",
 		message: "Memory Limit",
-		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].limits.memory,
+		default: ({ template }: Answers) => template === "none" ? undefined : templates[template].limits.memory,
 		filter: parseFloat
 	},
 	{
@@ -84,26 +85,26 @@ const questions: inquirer.Questions = [
 		type: "input",
 		name: "scripts.compile",
 		message: "Compile Command",
-		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].scripts.compile,
+		default: ({ template }: Answers) => template === "none" ? undefined : templates[template].scripts.compile,
 	},
 	{
 		type: "input",
 		name: "scripts.run",
 		message: "Build Command",
-		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].scripts.run,
+		default: ({ template }: Answers) => template === "none" ? undefined : templates[template].scripts.run,
 	},
 	{
 		type: "input",
 		name: "scripts.cleanup",
 		message: "Cleanup Command",
-		default: ({ template }: Answers) => template === "none" ? undefined : TEMPLATES[template].scripts.cleanup,
+		default: ({ template }: Answers) => template === "none" ? undefined : templates[template].scripts.cleanup,
 	},
 	{
 		type: "list",
 		name: "checker",
 		message: "Checker Options",
 		choices: ["Exact Match" /*, "1e-3 Error", "1e-4 Error", "1e-6 Error" */],
-		filter: (val) => {
+		filter: (val: string) => {
 			switch (val) {
 				case "Exact Match": return { type: "lines" };
 				case "1e-3 Error": return { type: "abs-rel", amount: 3 };
@@ -118,54 +119,59 @@ const questions: inquirer.Questions = [
 		message: "Debug Output Delimeter",
 		default: "#"
 	}
-] as inquirer.Questions; // ugh
+];
 
 interface Answers extends Testset {
 	template: string;
 }
 
-fs.readFile(".slither/config.json", (err, data) => {
-	if (err) {
+let templatesPrm =
+	fs.readFile(path.join(process.env["HOME"], ".slither_templates"))
+		.then((templatesBuf) => JSON.parse(templatesBuf.toString()))
+		.catch((err) => DEFAULT_TEMPLATES);
+
+Promise.all([fs.readFile(".slither/config.json"), templatesPrm])
+	.catch((err) => {
 		console.error(`${RED}No Slither configuration found in the current directory.  Run ${WHITE}${BOLD}slither init${RED} first.${CLEAR}`);
-		return;
-	}
+		process.exit(1);
+	})
+	.then(([configBuf, templates]: [Buffer, { [key: string]: any }]) => {
+		let config = JSON.parse(configBuf.toString()) as Config;
 
-	let config = JSON.parse(data.toString()) as Config;
+		inquirer.prompt(questions(templates) as inquirer.Questions)
+			.then((answers: Answers) => {
+				delete answers.template;
+				let name = answers.name;
+				delete answers.name;
 
-	inquirer.prompt(questions)
-		.then((answers: Answers) => {
-			delete answers.template;
-			let name = answers.name;
-			delete answers.name;
+				answers.io.input = answers.io.input.replace("{name}", name);
+				answers.io.output = answers.io.output.replace("{name}", name);
+				answers.scripts.compile = answers.scripts.compile.replace("{name}", name);
+				answers.scripts.run = answers.scripts.run.replace("{name}", name);
+				answers.scripts.cleanup = answers.scripts.cleanup.replace("{name}", name);
 
-			answers.io.input = answers.io.input.replace("{name}", name);
-			answers.io.output = answers.io.output.replace("{name}", name);
-			answers.scripts.compile = answers.scripts.compile.replace("{name}", name);
-			answers.scripts.run = answers.scripts.run.replace("{name}", name);
-			answers.scripts.cleanup = answers.scripts.cleanup.replace("{name}", name);
-
-			if (name in config) {
-				console.error(`${RED}A testset with the name ${name} already exists.${CLEAR}`);
-				return;
-			}
-
-			config[name] = answers as Testset;
-
-			fs.writeFile(".slither/config.json", JSON.stringify(config, null, "\t"), (err) => {
-				if (err) {
-					console.error(`${RED}File system error:`, err, `${CLEAR}`);
+				if (name in config) {
+					console.error(`${RED}A testset with the name ${name} already exists.${CLEAR}`);
 					return;
 				}
 
-				fs.mkdir(`.slither/${name}`, (err) => {
+				config[name] = answers as Testset;
+
+				fs.writeFile(".slither/config.json", JSON.stringify(config, null, "\t"), (err) => {
 					if (err) {
-						console.warn(`${YELLOW}File system error:`, err.message, `${CLEAR}`);
-						console.warn(`${YELLOW}Continuing anyway...${CLEAR}`);
+						console.error(`${RED}File system error:`, err, `${CLEAR}`);
+						return;
 					}
 
-					console.log(`${GREEN}Added test set ${name} to Slither.${CLEAR} ${SNEK}`);
+					fs.mkdir(`.slither/${name}`, (err) => {
+						if (err) {
+							console.warn(`${YELLOW}File system error:`, err.message, `${CLEAR}`);
+							console.warn(`${YELLOW}Continuing anyway...${CLEAR}`);
+						}
+
+						console.log(`${GREEN}Added test set ${name} to Slither.${CLEAR} ${SNEK}`);
+					});
 				});
-			});
-		})
-		.catch((err) => console.log(err));
-});
+			})
+			.catch((err) => console.log(err));
+	});
