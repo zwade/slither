@@ -55,6 +55,11 @@ function parseTests(val: string) {
 	return tests;
 }
 
+function exit(message: string): any {
+	console.error(message);
+	process.exit(1);
+}
+
 let name: string;
 
 commander
@@ -70,74 +75,75 @@ commander
 if (name === undefined) {
 	console.error(`${RED}Missing test set name.${CLEAR}`);
 } else {
-	let configPrm = fs.readFile(".slither/config.json");
+	fs.readFile(".slither/config.json")
+		.catch(() => exit(`${RED}No Slither configuration found in the current directory.  Run ${WHITE}${BOLD}slither init${RED}${CLEAR}${RED} first.${CLEAR}`))
+		.then((data: Buffer) => {
+			let config = JSON.parse(data.toString()) as Config;
+			let testset: Testset = config[name];
 
-	configPrm.catch((err) => {
-		console.error(`${RED}No Slither configuration found in the current directory.  Run ${WHITE}${BOLD}slither init${RED}${CLEAR}${RED} first.${CLEAR}`);
-		process.exit(1);
-	});
+			if (!testset) {
+				return Promise.reject(`${RED}No testset with the name "${name}" was found.${CLEAR}`);
+			}
 
-	configPrm.then((data) => {
-		let config = JSON.parse(data.toString()) as Config;
-		let testset: Testset = config[name];
+			let tests = (commander as any).tests;
 
-		if (!testset) {
-			console.error(`${RED}No testset with the name "${name}" was found.${CLEAR}`);
-		}
-
-		let tests = (commander as any).tests;
-
-		if (Array.isArray(tests)) {
+			if (Array.isArray(tests)) {
+				return { testset, tests };
+			} else {
+				return getAllTests(name).then((tests) => ({ testset, tests }));
+			}
+		})
+		.catch(exit)
+		.then(({ testset, tests }: { testset: Testset, tests: number[] }) => {
+			if ((commander as any).raw && tests.length != 1) {
+				return Promise.reject(`${BOLD}${RED}Error: -r/--raw can only be used with a single test${CLEAR}${SHOW_CURSOR}`);
+			} else if ((commander as any).raw && (commander as any).inspect) {
+				return Promise.reject(`${BOLD}${RED}Error: -r/--raw can't be used with -i/--inspect${SHOW_CURSOR}`);
+			}
 			return Promise.resolve({ testset, tests });
-		} else {
-			return getAllTests(name).then((tests) => ({ testset, tests }));
-		}
-	}).then(({ testset, tests }) => {
-		if ((commander as any).raw && tests.length != 1) {
-			console.error(`${BOLD}${RED}Error: -r/--raw can only be used with a single test${CLEAR}${SHOW_CURSOR}`);
-			process.exit(1); // TODO: better control flow
-		} else if ((commander as any).raw && (commander as any).inspect) {
-			console.error(`${BOLD}${RED}Error: -r/--raw can't be used with -i/--inspect${SHOW_CURSOR}`);
-			process.exit(1); // TODO: better control flow
-		}
+		})
+		.catch(exit)
+		.then(({ testset, tests }: { testset: Testset, tests: number[] }) => {
+			return Promise.all([
+				testset,
+				tests,
+				exec(testset.scripts.compile)
+			]) as Promise<[Testset, number[], { stdout: string, stderr: string }]>;
+		})
+		.catch(({ stderr }: { stderr: string }) => exit(`${BOLD}${RED}Compile error:${CLEAR}\n\n${stderr}${SHOW_CURSOR}`))
+		.then(([testset, tests]: [Testset, number[]]) => {
+			process.stdout.write(HIDE_CURSOR);
 
-		let compilePrm: Promise<any> = exec(testset.scripts.compile);
-
-		compilePrm = compilePrm.catch(({ stdout, stderr }) => {
-			console.error(`${BOLD}${RED}Compile error:${CLEAR}\n\n${stderr}${SHOW_CURSOR}`);
-			process.exit(1); // TODO: better control flow
-		});
-
-		process.stdout.write(HIDE_CURSOR);
-
-		let prm: Promise<Results> = compilePrm.then(() => ({
-			results: tests.map((index: number) => ({ index, state: State.WAITING } as IncompleteTestResult))
-		}));
-
-		for (let i = 0; i < tests.length; i++) {
-			prm.then((results) => {
-				results.results[i].state = State.RUNNING;
-				update(results);
-			}).catch((error) => console.error(`${RED}Error: ${error}${CLEAR}`));
-
-			prm = prm.then((results) => {
-				return test(results, name, testset, tests[i], i);
+			let prm: Promise<Results> = Promise.resolve({
+				results: tests.map((index: number) => ({ index, state: State.WAITING } as IncompleteTestResult))
 			});
-		}
 
-		return prm.then((results) => {
-			update(results);
-			process.stdout.write(DOWN(results.results.length));
-			exec(testset.scripts.cleanup);
-			return results;
-		});
-	}).then((results) => {
-		if ((commander as any).inspect) {
-			new Inspector(results);
-		} else {
-			process.stdout.write(SHOW_CURSOR);
-		}
-	}).catch((err) => { console.error(`${RED}Error:`, err, SHOW_CURSOR, CLEAR); });
+			for (let i = 0; i < tests.length; i++) {
+				prm.then((results) => {
+					results.results[i].state = State.RUNNING;
+					update(results);
+				}).catch((error) => console.error(`${RED}Error: ${error}${CLEAR}`));
+
+				prm = prm.then((results) => {
+					return test(results, name, testset, tests[i], i);
+				});
+			}
+
+			return prm.then((results) => {
+				update(results);
+				process.stdout.write(DOWN(results.results.length));
+				exec(testset.scripts.cleanup);
+				return results;
+			});
+		})
+		.then((results: Results) => {
+			if ((commander as any).inspect) {
+				new Inspector(results);
+			} else {
+				process.stdout.write(SHOW_CURSOR);
+			}
+		})
+		.catch((err: any) => exit(`${RED}Error:${err}${SHOW_CURSOR}${CLEAR}`));
 }
 
 function exec(cmd: string, input: string = "", timeout: number = 0): Promise<{ stdout: string, stderr: string, timeout?: boolean }> {
@@ -166,11 +172,7 @@ function exec(cmd: string, input: string = "", timeout: number = 0): Promise<{ s
 			}, timeout);
 		}
 
-		// let interval = setInterval(() => fs.readFile(`/proc/${child.pid}/stat`).then(console.log), 20);
-
 		child.on("close", (code) => {
-			// clearInterval(interval);
-
 			if (timer) {
 				clearTimeout(timer);
 			}

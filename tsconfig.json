@@ -8,7 +8,8 @@
 		"removeComments": true,
 		"noImplicitAny": true,
 		"outDir": "bin",
-		"pretty": true
+		"pretty": true,
+		"noErrorTruncation": true
 	},
 	"exclude": [
 		"node_modules",
