@@ -127,8 +127,16 @@ interface Answers extends Testset {
 
 let templatesPrm =
 	fs.readFile(path.join(process.env["HOME"], ".slither_templates"))
-		.then((templatesBuf) => JSON.parse(templatesBuf.toString()))
-		.catch((err) => DEFAULT_TEMPLATES);
+		.then((templatesBuf) => {
+			try {
+				return JSON.parse(templatesBuf.toString());
+			} catch (err) {
+				// ~/.slither_templates was not valid json
+				console.error(`${BOLD}${RED}Failed to parse ~/.slither_templates.  Using default templates.${CLEAR}`);
+				return DEFAULT_TEMPLATES;
+			}
+		})
+		.catch((err) => DEFAULT_TEMPLATES); // ~/.slither_templates was not found
 
 Promise.all([fs.readFile(".slither/config.json"), templatesPrm])
 	.catch((err) => {
